@@ -1,0 +1,219 @@
+
+-- Creating Database
+
+CREATE DATABASE IsabellasTechStore;
+USE IsabellasTechStore;
+
+-- Creating Tables
+
+CREATE TABLE Customers (
+    CustomerID INT PRIMARY KEY,
+    Name NVARCHAR(100),
+    Email NVARCHAR(100),
+    PhoneNumber NVARCHAR(20)
+);
+
+CREATE TABLE Products (
+    ProductID INT PRIMARY KEY,
+    ProductName NVARCHAR(100),
+    Brand NVARCHAR(50),
+    Price DECIMAL(10, 2),
+    StockQuantity INT
+);
+
+-- Orders Table
+
+CREATE TABLE Orders (
+    OrderID INT PRIMARY KEY,
+    CustomerID INT,
+    OrderDate DATETIME,
+    TotalAmount DECIMAL(10, 2),
+    FOREIGN KEY (CustomerID) REFERENCES Customers(CustomerID)
+);
+
+-- OrderItems Table
+
+CREATE TABLE OrderItems (
+    OrderItemID INT PRIMARY KEY,
+    OrderID INT,
+    ProductID INT,
+    Quantity INT,
+    Subtotal DECIMAL(10, 2),
+    FOREIGN KEY (OrderID) REFERENCES Orders(OrderID),
+    FOREIGN KEY (ProductID) REFERENCES Products(ProductID)
+);
+
+-- Inserting Data into Tables
+
+INSERT INTO Customers (CustomerID, Name, Email, PhoneNumber)
+VALUES 
+(1, 'Alice Johnson', 'alice.johnson@email.com', '123-456-7890'),
+(2, 'Bob Smith', 'bob.smith@email.com', '234-567-8901');
+
+INSERT INTO Products (ProductID, ProductName, Brand, Price, StockQuantity)
+VALUES 
+(1, 'iPhone 14', 'Apple', 999.99, 50),
+(2, 'Galaxy S23', 'Samsung', 849.99, 30),
+(3, 'Pixel 7', 'Google', 599.99, 40);
+
+INSERT INTO Orders (OrderID, CustomerID, OrderDate, TotalAmount)
+VALUES 
+(1, 1, '2025-03-10 14:30:00', 1849.98),
+(2, 2, '2025-03-11 15:45:00', 1249.98);
+
+INSERT INTO OrderItems (OrderItemID, OrderID, ProductID, Quantity, Subtotal)
+VALUES 
+(1, 1, 1, 1, 999.99),
+(2, 1, 2, 1, 849.99),
+(3, 2, 3, 2, 1199.98);
+
+
+-- Basic SQL Queries
+
+-- View All Products
+
+SELECT * FROM Products;
+
+-- 2. View All Orders
+
+SELECT * FROM Orders;
+
+-- 3. View All Order Items (with Product Details)
+
+SELECT 
+    oi.OrderItemID, oi.OrderID, p.ProductName, oi.Quantity, oi.Subtotal
+FROM OrderItems oi
+JOIN Products p ON oi.ProductID = p.ProductID;
+
+-- 4. Update Product Stock After Sale
+
+UPDATE Products
+SET StockQuantity = StockQuantity - 1
+WHERE ProductID = 1; -- For iPhone 14
+
+
+-- 5. Total Revenue of All Orders
+
+SELECT SUM(TotalAmount) AS TotalRevenue
+FROM Orders;
+
+-- 6. Delete a Product
+
+DELETE FROM Products
+WHERE ProductID = 4; -- Remove OnePlus 11
+
+
+-- 7. Using `JOIN`
+
+-- retrieves order details with product and customer information by joining the relevant tables:
+
+SELECT 
+    o.OrderID,
+    c.Name AS CustomerName,
+    c.Email AS CustomerEmail,
+    oi.Quantity,
+    p.ProductName,
+    oi.Subtotal,
+    o.OrderDate,
+    o.TotalAmount
+FROM Orders o
+JOIN Customers c ON o.CustomerID = c.CustomerID
+JOIN OrderItems oi ON o.OrderID = oi.OrderID
+JOIN Products p ON oi.ProductID = p.ProductID;
+
+--8. Creating a Stored Procedure
+
+-- Adds a New Order
+
+
+CREATE PROCEDURE AddOrder(
+    IN p_CustomerID INT,
+    IN p_ProductID INT,
+    IN p_Quantity INT
+)
+BEGIN
+    DECLARE v_Price DECIMAL(10, 2);
+    DECLARE v_TotalAmount DECIMAL(10, 2);
+    DECLARE v_StockQuantity INT;
+
+    -- Gets the price and stock of the product
+    SELECT Price, StockQuantity INTO v_Price, v_StockQuantity
+    FROM Products
+    WHERE ProductID = p_ProductID;
+
+    -- Checks if there is enough stock
+    IF v_StockQuantity < p_Quantity THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Not enough stock for the requested quantity.';
+    ELSE
+        -- Insert the order
+        INSERT INTO Orders (CustomerID, OrderDate, TotalAmount)
+        VALUES (p_CustomerID, NOW(), 0);
+
+        -- Gets the last inserted order ID
+        SET @OrderID = LAST_INSERT_ID();
+
+        -- Inserts the order items
+        INSERT INTO OrderItems (OrderID, ProductID, Quantity, Subtotal)
+        VALUES (@OrderID, p_ProductID, p_Quantity, v_Price * p_Quantity);
+
+        -- Updates the total amount of the order
+        SET v_TotalAmount = v_Price * p_Quantity;
+        UPDATE Orders SET TotalAmount = v_TotalAmount WHERE OrderID = @OrderID;
+
+        -- Updates stock quantity
+        UPDATE Products SET StockQuantity = StockQuantity - p_Quantity WHERE ProductID = p_ProductID;
+    END IF;
+END 
+
+-- 9. Creating a View
+
+CREATE VIEW CustomerOrderHistory AS
+SELECT 
+    o.OrderID,
+    o.OrderDate,
+    oi.ProductID,
+    p.ProductName,
+    oi.Quantity,
+    oi.Subtotal,
+    o.TotalAmount
+FROM Orders o
+JOIN OrderItems oi ON o.OrderID = oi.OrderID
+JOIN Products p ON oi.ProductID = p.ProductID;
+
+
+-- 10. Error Handling with `TRY...CATCH`
+
+
+BEGIN TRY
+    -- In this cenario the product ID does not exist an we are going to handle the error
+    DECLARE @ProductID INT = 999;  -- Non-existent product
+    DECLARE @Quantity INT = 1;
+
+    -- Checks if product exists
+    IF NOT EXISTS (SELECT 1 FROM Products WHERE ProductID = @ProductID)
+    BEGIN
+        THROW 50001, 'Product does not exist.', 1;
+    END
+
+    -- If product exists, proceed with the order insertion
+    INSERT INTO Orders (CustomerID, OrderDate, TotalAmount)
+    VALUES (1, GETDATE(), 0);
+
+    DECLARE @OrderID INT = SCOPE_IDENTITY();
+
+    INSERT INTO OrderItems (OrderID, ProductID, Quantity, Subtotal)
+    VALUES (@OrderID, @ProductID, @Quantity, 100.00); 
+
+    UPDATE Orders
+    SET TotalAmount = 100.00 * @Quantity
+    WHERE OrderID = @OrderID;
+    
+    PRINT 'Order inserted successfully';
+
+END TRY
+BEGIN CATCH
+
+    PRINT 'Error occurred: ' + ERROR_MESSAGE();
+END CATCH
+
+
